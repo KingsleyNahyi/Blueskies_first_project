@@ -1,0 +1,6 @@
+.env
+local.db
+local.db-*
+*.log
+/bin/
+bbserver

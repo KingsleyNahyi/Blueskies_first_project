@@ -1,0 +1,66 @@
+{{define "content"}}
+<div class="course-header">
+  <h1>New course</h1>
+</div>
+
+{{if .Error}}
+  <div class="alert alert-error">{{.Error}}</div>
+{{end}}
+
+<div class="card">
+  <form method="POST" action="/courses" id="course-form">
+    <label for="title">Title</label>
+    <input type="text" id="title" name="title" required placeholder="e.g. System Design Fundamentals">
+
+    <label for="description">Description (optional)</label>
+    <input type="text" id="description" name="description" placeholder="Short blurb for mentees">
+
+    <label>Tasks</label>
+    <div id="task-rows"></div>
+    <button type="button" id="add-task-btn" class="btn btn-outline btn-small">+ Add task</button>
+    <p class="task-hint" id="task-hint">Add at least one task.</p>
+
+    <button type="submit" class="btn btn-primary btn-block" id="submit-btn" disabled>Create course</button>
+  </form>
+</div>
+
+<script>
+  // Each row is two form fields with the same `name` -- browsers submit
+  // repeated same-name fields as a list, and Go's r.Form["task_title"]
+  // picks them all up as a slice in the order submitted. No JS framework,
+  // no array-index bookkeeping needed on this side.
+  const taskRows = document.getElementById('task-rows');
+  const addBtn = document.getElementById('add-task-btn');
+  const submitBtn = document.getElementById('submit-btn');
+  const hint = document.getElementById('task-hint');
+
+  function addTaskRow() {
+    const row = document.createElement('div');
+    row.className = 'task-input-row';
+    row.innerHTML =
+      '<input type="text" name="task_title" placeholder="Task title (e.g. Watch load balancing intro)" required>' +
+      '<select name="task_type">' +
+        '<option value="video">Video</option>' +
+        '<option value="reading">Reading</option>' +
+        '<option value="resource">Resource</option>' +
+        '<option value="other" selected>Other</option>' +
+      '</select>' +
+      '<button type="button" class="btn-remove-task" aria-label="Remove task">&times;</button>';
+    row.querySelector('.btn-remove-task').addEventListener('click', function () {
+      row.remove();
+      updateState();
+    });
+    taskRows.appendChild(row);
+    updateState();
+  }
+
+  function updateState() {
+    const count = taskRows.querySelectorAll('.task-input-row').length;
+    submitBtn.disabled = count === 0;
+    hint.textContent = count === 0 ? 'Add at least one task.' : count + ' task' + (count === 1 ? '' : 's') + ' added.';
+  }
+
+  addBtn.addEventListener('click', addTaskRow);
+  addTaskRow(); // start with one row so the form isn't empty-looking by default
+</script>
+{{end}}

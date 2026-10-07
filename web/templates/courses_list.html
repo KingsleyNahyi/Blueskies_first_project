@@ -1,0 +1,20 @@
+{{define "content"}}
+<div class="course-header dashboard-actions">
+  <h1>Your courses</h1>
+  <a href="/courses/new" class="btn btn-primary btn-small">+ New course</a>
+</div>
+
+{{range .Courses}}
+<div class="card course-card">
+  <div class="course-card-info">
+    <div class="course-card-title">{{.Title}}</div>
+    <div class="muted">{{.TaskCount}} tasks · {{.EnrolledCount}} mentees enrolled</div>
+  </div>
+  <a href="/courses/{{.ID}}/edit" class="btn btn-outline btn-small">Edit</a>
+</div>
+{{end}}
+
+{{if not .Courses}}
+  <p class="muted">No courses yet. <a href="/courses/new">Create your first one</a>.</p>
+{{end}}
+{{end}}

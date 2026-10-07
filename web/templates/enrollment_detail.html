@@ -1,0 +1,53 @@
+{{define "content"}}
+<a href="/dashboard" class="back-link">&larr; Your courses</a>
+
+<div class="course-header">
+  <div>
+    <h1>{{.CourseTitle}}</h1>
+    <p class="muted">Mentor: {{.MentorName}}</p>
+  </div>
+</div>
+
+<div class="card progress-card">
+  <div class="progress-track">
+    <div class="progress-fill" style="width: {{.PercentComplete}}%"></div>
+  </div>
+  <p class="muted">{{.CompletedCount}} / {{.TotalCount}} tasks complete ({{.PercentComplete}}%)</p>
+</div>
+
+<h2 class="section-label">Timeline</h2>
+<div class="card">
+  {{range .Tasks}}
+  <div class="task-row {{if .Flagged}}task-row-flagged{{end}}">
+    <span class="task-dot {{if .CompletedAt}}task-dot-done{{end}}"></span>
+    <div class="task-info">
+      <div class="task-title">{{.Title}}</div>
+      {{if .CompletedAt}}
+        <div class="muted">Completed {{.CompletedAt}}</div>
+      {{else if .DueDate}}
+        <div class="task-due">Due {{.DueDate}}</div>
+      {{end}}
+      {{if .Flagged}}
+        <div class="flag-note">&#128681; You flagged this task as stuck</div>
+      {{end}}
+    </div>
+
+    {{if not .CompletedAt}}
+      <form method="POST" action="/enrollments/{{$.EnrollmentID}}/tasks/{{.ID}}/complete">
+        <button type="submit" class="btn btn-outline btn-small">Mark done</button>
+      </form>
+      {{if not .Flagged}}
+        <button type="button" class="btn btn-flag btn-small" onclick="document.getElementById('flag-form-{{.ID}}').classList.toggle('hidden')">I'm stuck</button>
+      {{end}}
+    {{end}}
+  </div>
+
+  {{if not .Flagged}}
+  <form id="flag-form-{{.ID}}" method="POST" action="/enrollments/{{$.EnrollmentID}}/tasks/{{.ID}}/flag" class="flag-form hidden">
+    <textarea name="note" placeholder="What are you stuck on?" required></textarea>
+    <button type="submit" class="btn btn-primary btn-small">Send flag</button>
+  </form>
+  {{end}}
+  {{end}}
+</div>
+{{end}}

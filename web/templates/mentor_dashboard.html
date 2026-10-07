@@ -1,0 +1,38 @@
+{{define "content"}}
+<div class="course-header dashboard-actions">
+  <h1>Your mentees</h1>
+  <div class="action-links">
+    <a href="/courses" class="btn btn-outline btn-small">Your courses</a>
+    <a href="/enrollments/new" class="btn btn-primary btn-small">+ Enroll mentee</a>
+  </div>
+</div>
+
+<div class="mentee-list">
+  {{range .Mentees}}
+  <div class="card mentee-row {{if eq .Status "flagged"}}mentee-row-flagged{{end}}">
+    <div class="avatar">{{.Initials}}</div>
+    <div class="mentee-info">
+      <div class="mentee-name">{{.MenteeName}}</div>
+      <div class="mentee-status status-{{.Status}}">
+        {{if eq .Status "flagged"}}🚩 Flagged{{end}}
+        {{if eq .Status "behind_pace"}}Behind pace{{end}}
+        {{if eq .Status "on_track"}}On track{{end}}
+      </div>
+    </div>
+    <div class="mentee-progress">{{.CompletedTasks}} / {{.TotalTasks}}</div>
+    <div class="progress-track progress-track-small">
+      <div class="progress-fill" style="width: {{.PercentComplete}}%"></div>
+    </div>
+    {{if eq .Status "flagged"}}
+      <form method="POST" action="/mentor/enrollments/{{.EnrollmentID}}/resolve-flags">
+        <button type="submit" class="btn btn-outline btn-small">Resolve</button>
+      </form>
+    {{end}}
+  </div>
+  {{end}}
+
+  {{if not .Mentees}}
+  <p class="muted">No mentees enrolled in your courses yet.</p>
+  {{end}}
+</div>
+{{end}}

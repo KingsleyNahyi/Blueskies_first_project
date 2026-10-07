@@ -1,0 +1,26 @@
+{{define "base"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.PageTitle}} · BluesBirds Academy</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <nav class="nav">
+    <div class="nav-brand">BluesBirds Academy</div>
+    <div class="nav-links">
+      {{if .User}}
+        <span class="nav-user">{{.User.Name}} · {{.User.Role}}</span>
+        <a href="/logout">Log out</a>
+      {{end}}
+    </div>
+  </nav>
+
+  <main class="page">
+    {{template "content" .}}
+  </main>
+</body>
+</html>
+{{end}}

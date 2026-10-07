@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+
+<head> 
+  <meta charset = "UTF-8">
+  <meta name = "viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hangman</title>
+</head>
+
+<body>
+  <h1>Hangman</h1>
+  <img src="images/hangman_stage_1.png" width=""200px" height = "200px">
+  <p id="wordDisplay"></p>
+
+  <label for="letterInput">Enter a letter:</label>
+  <input type="text" id="letterInput" maxlength="1">
+  <button id="guessButton">Guess</button>
+
+  <p id="message"></p>
+
+  <script>
+    //for now using a fixed word
+    const secretWord = "keyboard";
+    
+    let wrongGuesses = 0; 
+    let remainingAttempts = 6; 
+    let gameOver=false; 
+    
+    const hangmanImage = document.getElementById("hangmanImage");
+    const wordDisplay = document.getElementById("wordDisplay");
+    const letterInput = document.getElementById("letterInput");
+    const guessButton = document.getElementById("guessButton");
+    const message = document.getElementById("message");
+
+    let blank_space = "";
+    for(let i=0; i<secretWord.length; i++){
+      blanks+="_ ";
+    }
+    wordDisplay.textContent = blanks; 
+
+    guessButton.addEventListener("click", function() {
+      if (gameOver === false){
+        const guess = letterInput.value.toLowerCase(); 
+        letterInput.value = "";
+
+      }
+      let wrong = true; 
+      for(let i =0; i<secretWord.lenght; i++){
+        if(secretWord[i]===guess){
+          display[i] = guess; 
+          wrong = false; 
+        }
+      }
+      if (wrong===true){
+        wrongGuesses++; 
+        remainingAttempts--; 
+        message.textContent = "Nope, wrong guess" + remainingAttempts + "left";
+
+      }
+      else{
+        message.textContent = "Nice good guess. "
+      }
+        hangmanImage.src = "images/hangman_stage_" + (wrongGuesses + 1) + ".png";
+ 
+          // any blanks left? if not, the player has won
+          let allFound = true;
+          for (let i = 0; i < display.length; i++) {
+            if (display[i] === "_") {
+              allFound = false;
+            }
+          }
+ 
+          if (allFound === true) {
+            message.textContent = "You win! The word was " + secretWord + ".";
+            gameOver = true;
+          } else if (remainingAttempts === 0) {
+            message.textContent = "You lose! The word was " + secretWord + ".";
+            gameOver = true;
+          }
+        }
+    
+  
+
+    )
+
+
+
+    
+  </script>
+</body>
+
+
+
+</html>
