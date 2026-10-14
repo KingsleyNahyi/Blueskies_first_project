@@ -1,10 +1,6 @@
-# Bluesbirds Academy — Backend (POC)
+# Bluesbirds Academy — Backend (POC) and FrontENd. 
 
-Go backend for the mentor/mentee tracking core described in the design
-discussion doc. This covers section 2 of that doc end to end (courses,
-enrollments with per-task due dates, task completions as the check-in
-mechanism, and flags) plus the RBAC roles and the mentor dashboard
-aggregation from section 6's mockups.
+This project serves as a solution to the mentee -mentor disconnect in BluesBirds. It seeks to allow Mentors to track progress and aid Mentees have a better way to see their upcoming tasks, communicate to mentors and have a better notification system. 
 
 **Not built yet** (still open per the design doc): the community/social
 layer (section 3), contracts, events, notification delivery (email
