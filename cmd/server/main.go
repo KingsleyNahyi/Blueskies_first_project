@@ -13,6 +13,7 @@ import (
 	"github.com/bluesbirds/academy/internal/handlers"
 	appmiddleware "github.com/bluesbirds/academy/internal/middleware"
 	"github.com/bluesbirds/academy/internal/models"
+	"github.com/bluesbirds/academy/internal/notify"
 )
 
 func main() {
@@ -28,19 +29,28 @@ func main() {
 		log.Fatalf("migrations: %v", err)
 	}
 
+	notifyClient := notify.NewClient(cfg.ResendAPIKey, cfg.FromEmail)
+	if !notifyClient.Enabled() {
+		log.Println("RESEND_API_KEY not set — email sending is disabled (fine for local dev)")
+	}
+	notify.StartDailyDigest(conn, notifyClient, cfg.AppBaseURL)
+
 	authH := &handlers.AuthHandler{DB: conn, JWTSecret: cfg.JWTSecret}
 	courseH := &handlers.CourseHandler{DB: conn}
 	enrollmentH := &handlers.EnrollmentHandler{DB: conn}
 	completionH := &handlers.CompletionHandler{DB: conn}
-	flagH := &handlers.FlagHandler{DB: conn}
+	flagH := &handlers.FlagHandler{DB: conn, Notify: notifyClient, AppBaseURL: cfg.AppBaseURL}
 	dashboardH := &handlers.DashboardHandler{DB: conn}
-	pageH := &handlers.PageHandler{DB: conn, JWTSecret: cfg.JWTSecret, Templates: handlers.LoadPageTemplates()}
+	pageH := &handlers.PageHandler{
+		DB: conn, JWTSecret: cfg.JWTSecret, Templates: handlers.LoadPageTemplates(),
+		Notify: notifyClient, AppBaseURL: cfg.AppBaseURL,
+	}
 
 	r := chi.NewRouter()
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"}, // tighten before this leaves POC stage
+		AllowedOrigins:   []string{"*"}, // tighten before this leaves POC stage -- see deployment notes
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type"},
 		AllowCredentials: false,
@@ -48,6 +58,13 @@ func main() {
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
+	})
+
+	// The bare site URL: send everyone to /dashboard. Logged-in users land
+	// on their dashboard; anyone else gets bounced to /login by the cookie
+	// middleware guarding that route.
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 	})
 
 	// Static assets for the server-rendered frontend (web/static/css/style.css etc).
