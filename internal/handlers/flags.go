@@ -11,11 +11,15 @@ import (
 
 	"github.com/bluesbirds/academy/internal/middleware"
 	"github.com/bluesbirds/academy/internal/models"
+	"github.com/bluesbirds/academy/internal/notify"
 )
 
-type FlagHandler struct {
-	DB *sql.DB
+	type FlagHandler struct {
+	DB         *sql.DB
+	Notify     *notify.Client
+	AppBaseURL string
 }
+
 
 type createFlagRequest struct {
 	CourseTaskID string `json:"course_task_id"`

@@ -5,6 +5,15 @@ import (
 	"fmt"
 	"html"
 	"log"
+		"net/http"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
+	"github.com/bluesbirds/academy/internal/middleware"
+	"github.com/bluesbirds/academy/internal/models"
+	"github.com/bluesbirds/academy/internal/notify"
 )
 
 // FlagCreated emails the course's mentor. Call it with `go` so a slow
