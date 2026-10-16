@@ -13,6 +13,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/bluesbirds/academy/internal/middleware"
+	"github.com/bluesbirds/academy/internal/notify"
 	"github.com/bluesbirds/academy/internal/models"
 )
 
@@ -20,6 +21,8 @@ type PageHandler struct {
 	DB        *sql.DB
 	JWTSecret string
 	Templates map[string]*template.Template
+	Notify     *notify.Client
+AppBaseURL string
 }
 
 // LoadPageTemplates builds one *template.Template per page, each combining
@@ -485,11 +488,12 @@ func (h *PageHandler) CreateFlagPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "note is required", http.StatusBadRequest)
 		return
 	}
-
-	h.DB.Exec(
-		`INSERT INTO flags (id, enrollment_id, course_task_id, note, status) VALUES (?, ?, ?, ?, 'open')`,
-		uuid.NewString(), enrollmentID, taskID, note,
-	)
+if _, err := h.DB.Exec(
+	`INSERT INTO flags (id, enrollment_id, course_task_id, note, status) VALUES (?, ?, ?, ?, 'open')`,
+	uuid.NewString(), enrollmentID, taskID, note,
+); err == nil {
+	go notify.FlagCreated(h.DB, h.Notify, h.AppBaseURL, enrollmentID, taskID, note)
+}
 	http.Redirect(w, r, "/enrollments/"+enrollmentID, http.StatusSeeOther)
 }
 

@@ -13,6 +13,9 @@ type Config struct {
 	DatabaseAuth string // Turso auth token; empty for local sqlite
 	JWTSecret    string
 	Env          string // "dev" | "prod"
+	ResendAPIKey string
+FromEmail    string
+AppBaseURL   string
 }
 
 //loading the environment functinos using the get env helpers. 
@@ -23,6 +26,9 @@ func Load() Config {
 		DatabaseAuth: getEnv("DATABASE_AUTH_TOKEN", ""),
 		JWTSecret:    getEnv("JWT_SECRET", "dev-secret-change-me"),
 		Env:          getEnv("APP_ENV", "dev"),
+		ResendAPIKey: getEnv("RESEND_API_KEY", ""),
+FromEmail:    getEnv("FROM_EMAIL", "Bluesbirds Academy <onboarding@resend.dev>"),
+AppBaseURL:   getEnv("APP_BASE_URL", "http://localhost:8080"),
 	}
 }
 

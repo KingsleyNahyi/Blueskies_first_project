@@ -13,6 +13,7 @@ import (
 	"github.com/bluesbirds/academy/internal/handlers"
 	appmiddleware "github.com/bluesbirds/academy/internal/middleware"
 	"github.com/bluesbirds/academy/internal/models"
+	"github.com/bluesbirds/academy/internal/notify"
 )
 
 func main() {
@@ -27,14 +28,30 @@ func main() {
 	if err := db.RunMigrations(conn, "migrations"); err != nil {
 		log.Fatalf("migrations: %v", err)
 	}
+	if err := db.RunMigrations(conn, "migrations"); err != nil {
+		log.Fatalf("migrations: %v", err)
+	}
 
+	notifyClient := notify.NewClient(cfg.ResendAPIKey, cfg.FromEmail)
+	if !notifyClient.Enabled() {
+		log.Println("RESEND_API_KEY not set, email sending is disabled")
+	}
+
+	authH := &handlers.AuthHandler{DB: conn, JWTSecret: cfg.JWTSecret}
 	authH := &handlers.AuthHandler{DB: conn, JWTSecret: cfg.JWTSecret}
 	courseH := &handlers.CourseHandler{DB: conn}
 	enrollmentH := &handlers.EnrollmentHandler{DB: conn}
 	completionH := &handlers.CompletionHandler{DB: conn}
-	flagH := &handlers.FlagHandler{DB: conn}
+		// was: flagH := &handlers.FlagHandler{DB: conn}
+	flagH := &handlers.FlagHandler{DB: conn, Notify: notifyClient, AppBaseURL: cfg.AppBaseURL}
+
+	// was: pageH := &handlers.PageHandler{DB: conn, JWTSecret: cfg.JWTSecret, Templates: handlers.LoadPageTemplates()}
+	pageH := &handlers.PageHandler{
+		DB: conn, JWTSecret: cfg.JWTSecret, Templates: handlers.LoadPageTemplates(),
+		Notify: notifyClient, AppBaseURL: cfg.AppBaseURL,
+	}
 	dashboardH := &handlers.DashboardHandler{DB: conn}
-	pageH := &handlers.PageHandler{DB: conn, JWTSecret: cfg.JWTSecret, Templates: handlers.LoadPageTemplates()}
+
 
 	r := chi.NewRouter()
 	r.Use(chimiddleware.Logger)

@@ -58,7 +58,7 @@ func (h *FlagHandler) CreateFlag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: this is where a "mentor wants a check-in" style notification
+	go notify.FlagCreated(h.DB, h.Notify, h.AppBaseURL, enrollmentID, req.CourseTaskID, req.Note)
 	// trigger would fire once the notification model is decided
 	// (design doc section 2, still open).
 
