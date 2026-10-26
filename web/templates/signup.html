@@ -1,7 +1,7 @@
-{{define "content"}}
+\{{define "content"}}
 <div class="auth-card">
   <h1>Sign up</h1>
-  <p class="muted">For learners joining the academy. If you're a mentor or academy head, ask an admin to set up your account.</p>
+  <p class="muted">Create a new account as a mentee or a mentor.</p>
 
   {{if .Error}}
     <div class="alert alert-error">{{.Error}}</div>
@@ -16,6 +16,13 @@
 
     <label for="password">Password</label>
     <input type="password" id="password" name="password" required minlength="8">
+
+    <label for="role">Role</label>
+    <select id="role" name="role" required style="margin-bottom: 16px; width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #ccc;">
+      <option value="mentee" selected>Mentee</option>
+      <option value="mentor">Mentor</option>
+      <option value="admin">Admin</option>
+    </select>
 
     <button type="submit" class="btn btn-primary btn-block">Sign up</button>
   </form>

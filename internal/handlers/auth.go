@@ -36,24 +36,43 @@ type authResponse struct {
 }
 
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
-	var req registerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
+	var email, password, name string
+	var role models.Role
+
+	// Check if it's a standard HTML form submission or JSON
+	if r.Header.Get("Content-Type") == "application/json" {
+		var req registerRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		email, password, name, role = req.Email, req.Password, req.Name, req.Role
+	} else {
+		// Parse standard HTML form post data
+		if err := r.ParseForm(); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid form data")
+			return
+		}
+		email = r.FormValue("email")
+		password = r.FormValue("password")
+		name = r.FormValue("name")
+		role = models.Role(r.FormValue("role"))
 	}
-	if req.Email == "" || req.Password == "" || req.Name == "" {
+
+	if email == "" || password == "" || name == "" {
 		writeError(w, http.StatusBadRequest, "email, password and name are required")
 		return
 	}
-	switch req.Role {
+
+	switch role {
 	case models.RoleAcademyHead, models.RoleAdmin, models.RoleMentor, models.RoleMentee:
 		// valid
 	default:
-		writeError(w, http.StatusBadRequest, "role must be one of academy_head, admin, mentor, mentee")
-		return
+		// default to mentee if empty or invalid
+		role = models.RoleMentee
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not hash password")
 		return
@@ -61,10 +80,10 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	user := models.User{
 		ID:           uuid.NewString(),
-		Email:        req.Email,
+		Email:        email,
 		PasswordHash: string(hash),
-		Name:         req.Name,
-		Role:         req.Role,
+		Name:         name,
+		Role:         role,
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
 	}
 
@@ -80,6 +99,18 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	token, err := middleware.IssueToken(h.JWTSecret, user.ID, user.Role)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not issue token")
+		return
+	}
+
+	// If it's a browser form request, set the cookie/session and redirect to dashboard
+	if r.Header.Get("Content-Type") != "application/json" {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "token",
+			Value:    token,
+			Path:     "/",
+			HttpOnly: true,
+		})
+		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 		return
 	}
 
