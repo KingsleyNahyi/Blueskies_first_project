@@ -1,12 +1,11 @@
-package notify
+\package notify
 
 import (
 	"database/sql"
 	"fmt"
 	"html"
 	"log"
-		"net/http"
-	"time"
+	
 
 )
 
@@ -33,9 +32,9 @@ func FlagCreated(db *sql.DB, c *Client, baseURL, enrollmentID, taskID, note stri
 
 	subject := fmt.Sprintf("%s is stuck on \"%s\"", menteeName, taskTitle)
 	body := fmt.Sprintf(
-		`<p>Hi %s,</p><p><b>%s</b> flagged <b>%s</b> in <b>%s</b>:</p><blockquote>%s</blockquote><p><a href="%s/enrollments/%s">View their progress</a></p>`,
+		`<p>Hi %s,</p><p><b>%s</b> flagged <b>%s</b> in <b>%s</b>:</p><blockquote>%s</blockquote><p><a href="%s/dashboard">Open your dashboard</a></p>`,
 		html.EscapeString(mentorName), html.EscapeString(menteeName), html.EscapeString(taskTitle),
-		html.EscapeString(courseTitle), html.EscapeString(note), baseURL, enrollmentID,
+		html.EscapeString(courseTitle), html.EscapeString(note), baseURL,
 	)
 	if err := c.Send(mentorEmail, subject, body); err != nil {
 		log.Printf("notify: send failed: %v", err)
