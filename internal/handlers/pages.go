@@ -426,7 +426,7 @@ func (h *PageHandler) renderMentorDashboard(w http.ResponseWriter, mentorID stri
 		}
 		mentees = append(mentees, m)
 	}
-
+c
 	sortMenteesFlaggedFirst(mentees)
 
 	h.Templates["mentor_dashboard"].ExecuteTemplate(w, "base", mentorDashboardView{
@@ -455,7 +455,6 @@ func sortMenteesFlaggedFirst(m []menteeRowView) {
 }
 
 // --- Form actions (mentee marks a task done / flags it stuck) ---
-
 func (h *PageHandler) CompleteTaskPage(w http.ResponseWriter, r *http.Request) {
 	enrollmentID := chi.URLParam(r, "enrollmentID")
 	taskID := chi.URLParam(r, "taskID")
@@ -467,11 +466,41 @@ func (h *PageHandler) CompleteTaskPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.DB.Exec(
+	_, err := h.DB.Exec(
 		`INSERT INTO task_completions (id, enrollment_id, course_task_id) VALUES (?, ?, ?)
 		 ON CONFLICT (enrollment_id, course_task_id) DO NOTHING`,
 		uuid.NewString(), enrollmentID, taskID,
 	)
+	if err == nil {
+		// Asynchronously email the mentor that a task was completed
+		go func() {
+			if !h.Notify.Enabled() {
+				return
+			}
+			var mentorEmail, mentorName, menteeName, courseTitle, taskTitle string
+			err := h.DB.QueryRow(`
+				SELECT mu.email, mu.name, me.name, c.title, ct.title
+				FROM enrollments e
+				JOIN courses c      ON c.id = e.course_id
+				JOIN users mu       ON mu.id = c.mentor_id
+				JOIN users me       ON me.id = e.mentee_id
+				JOIN course_tasks ct ON ct.id = ?
+				WHERE e.id = ?`, taskID, enrollmentID,
+			).Scan(&mentorEmail, &mentorName, &menteeName, &courseTitle, &taskTitle)
+			if err != nil {
+				return
+			}
+
+			subject := fmt.Sprintf("%s completed \"%s\"", menteeName, taskTitle)
+			body := fmt.Sprintf(
+				`<p>Hi %s,</p><p><b>%s</b> just completed the task <b>%s</b> in course <b>%s</b>.</p><p><a href="%s/dashboard">Open your dashboard</a></p>`,
+				html.EscapeString(mentorName), html.EscapeString(menteeName), html.EscapeString(taskTitle),
+				html.EscapeString(courseTitle), h.AppBaseURL,
+			)
+			_ = h.Notify.Send(mentorEmail, subject, body)
+		}()
+	}
+
 	http.Redirect(w, r, "/enrollments/"+enrollmentID, http.StatusSeeOther)
 }
 
@@ -896,84 +925,37 @@ func (h *PageHandler) NewEnrollmentForm(w http.ResponseWriter, r *http.Request) 
 
 // CreateEnrollmentSubmit runs the same enroll-then-spread-due-dates
 // transaction as the JSON API's EnrollmentHandler.CreateEnrollment.
-func (h *PageHandler) CreateEnrollmentSubmit(w http.ResponseWriter, r *http.Request) {
-	user := h.mustCurrentUser(w, r)
-	if user == nil {
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "invalid form", http.StatusBadRequest)
-		return
-	}
-	menteeID := r.FormValue("mentee_id")
-	courseID := r.FormValue("course_id")
-	daysPerTask, err := strconv.Atoi(r.FormValue("days_per_task"))
-	if err != nil || daysPerTask <= 0 {
-		daysPerTask = 2
-	}
-
-	reRender := func(errMsg string) {
-		courses, mentees, _ := h.loadCoursesAndMentees(user.ID)
-		h.Templates["enrollment_new"].ExecuteTemplate(w, "base", enrollmentFormView{
-			PageTitle: "Enroll a mentee", User: user, Error: errMsg, Courses: courses, Mentees: mentees,
-		})
-	}
-
-	if menteeID == "" || courseID == "" {
-		reRender("Please choose both a course and a mentee.")
-		return
-	}
-
-	tx, err := h.DB.Begin()
-	if err != nil {
-		http.Error(w, "db error", http.StatusInternalServerError)
-		return
-	}
-	defer tx.Rollback()
-
-	enrollmentID := uuid.NewString()
-	if _, err := tx.Exec(
-		`INSERT INTO enrollments (id, mentee_id, course_id, status) VALUES (?, ?, ?, 'active')`,
-		enrollmentID, menteeID, courseID,
-	); err != nil {
-		reRender("Could not enroll — maybe this mentee is already in this course?")
-		return
-	}
-
-	rows, err := tx.Query(`SELECT id FROM course_tasks WHERE course_id = ? ORDER BY order_index ASC`, courseID)
-	if err != nil {
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	var taskIDs []string
-	for rows.Next() {
-		var id string
-		rows.Scan(&id)
-		taskIDs = append(taskIDs, id)
-	}
-	rows.Close()
-
-	now := time.Now()
-	for i, taskID := range taskIDs {
-		due := now.AddDate(0, 0, (i+1)*daysPerTask).Format("2006-01-02")
-		if _, err := tx.Exec(
-			`INSERT INTO enrollment_task_due_dates (id, enrollment_id, course_task_id, due_date) VALUES (?, ?, ?, ?)`,
-			uuid.NewString(), enrollmentID, taskID, due,
-		); err != nil {
-			http.Error(w, "could not set due dates: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
+if err := tx.Commit(); err != nil {
 		http.Error(w, "could not save enrollment", http.StatusInternalServerError)
 		return
 	}
 
-	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
-}
+	// Asynchronously email the mentee about their new course assignment
+	go func() {
+		if !h.Notify.Enabled() {
+			return
+		}
+		var menteeEmail, menteeName, courseTitle string
+		err := h.DB.QueryRow(`
+			SELECT me.email, me.name, c.title
+			FROM enrollments e
+			JOIN courses c ON c.id = e.course_id
+			JOIN users me ON me.id = e.mentee_id
+			WHERE e.id = ?`, enrollmentID,
+		).Scan(&menteeEmail, &menteeName, &courseTitle)
+		if err != nil {
+			return
+		}
 
-// --- Shared helpers ---
+		subject := fmt.Sprintf("You've been assigned to \"%s\"", courseTitle)
+		body := fmt.Sprintf(
+			`<p>Hi %s,</p><p>You have been enrolled in a new course: <b>%s</b>.</p><p><a href="%s/enrollments/%s">View your course timeline</a></p>`,
+			html.EscapeString(menteeName), html.EscapeString(courseTitle), h.AppBaseURL, enrollmentID,
+		)
+		_ = h.Notify.Send(menteeEmail, subject, body)
+	}()
+
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 
 func (h *PageHandler) mustCurrentUser(w http.ResponseWriter, r *http.Request) *models.User {
 	userID, _ := middleware.UserIDFromContext(r.Context())
