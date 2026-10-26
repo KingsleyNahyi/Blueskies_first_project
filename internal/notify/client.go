@@ -1,51 +1,47 @@
 package notify
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"time"
+	"net/smtp"
 )
 
 type Client struct {
-	apiKey string
-	from   string
-	http   *http.Client
+	password string // Holds your Gmail App Password
+	from     string // Holds your Gmail address
 }
 
-func NewClient(apiKey, from string) *Client {
-	return &Client{apiKey: apiKey, from: from, http: &http.Client{Timeout: 10 * time.Second}}
+func NewClient(password, from string) *Client {
+	return &Client{password: password, from: from}
 }
 
 // Enabled is nil-safe, so handlers can call it without checking for nil.
 func (c *Client) Enabled() bool {
-	return c != nil && c.apiKey != "" && c.from != ""
+	return c != nil && c.password != "" && c.from != ""
 }
 
 func (c *Client) Send(to, subject, htmlBody string) error {
 	if !c.Enabled() {
 		return nil
 	}
-	payload, _ := json.Marshal(map[string]any{
-		"from": c.from, "to": []string{to}, "subject": subject, "html": htmlBody,
-	})
-	req, err := http.NewRequest(http.MethodPost, "https://api.resend.com/emails", bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.http.Do(req)
+	smtpHost := "smtp.gmail.com"
+	smtpPort := "587"
+
+	auth := smtp.PlainAuth("", c.from, c.password, smtpHost)
+
+	// Construct email headers with HTML support
+	mime := "MIME-version: 1.0;\nContent-Type: text/html; charset=\"UTF-8\";\n"
+	subjectHeader := fmt.Sprintf("Subject: %s\n", subject)
+	fromHeader := fmt.Sprintf("From: %s\n", c.from)
+	toHeader := fmt.Sprintf("To: %s\n", to)
+
+	msg := []byte(fromHeader + toHeader + subjectHeader + mime + "\n" + htmlBody)
+
+	// Send email via Gmail SMTP server
+	err := smtp.SendMail(smtpHost+":"+smtpPort, auth, c.from, []string{to}, msg)
 	if err != nil {
-		return err
+		return fmt.Errorf("smtp send error: %w", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("resend: %s: %s", resp.Status, body)
-	}
+	
 	return nil
 }
