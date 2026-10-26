@@ -132,12 +132,19 @@ func (h *PageHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.FormValue("name"))
 	email := strings.TrimSpace(r.FormValue("email"))
 	password := r.FormValue("password")
+	roleStr := r.FormValue("role")
 
 	if name == "" || email == "" || len(password) < 8 {
 		h.Templates["signup"].ExecuteTemplate(w, "base", loginView{
 			PageTitle: "Sign up", Error: "Name, email, and a password of at least 8 characters are required.",
 		})
 		return
+	}
+
+	// Validate and assign the chosen role (defaulting to mentee if invalid)
+	role := models.RoleMentee
+	if roleStr == "mentor" {
+		role = models.RoleMentor
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -148,8 +155,8 @@ func (h *PageHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
 
 	userID := uuid.NewString()
 	_, err = h.DB.Exec(
-		`INSERT INTO users (id, email, password_hash, name, role) VALUES (?, ?, ?, ?, 'mentee')`,
-		userID, email, string(hash), name,
+		`INSERT INTO users (id, email, password_hash, name, role) VALUES (?, ?, ?, ?, ?)`,
+		userID, email, string(hash), name, role,
 	)
 	if err != nil {
 		h.Templates["signup"].ExecuteTemplate(w, "base", loginView{
@@ -158,7 +165,7 @@ func (h *PageHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := middleware.IssueToken(h.JWTSecret, userID, models.RoleMentee)
+	token, err := middleware.IssueToken(h.JWTSecret, userID, role)
 	if err != nil {
 		http.Error(w, "could not issue session", http.StatusInternalServerError)
 		return
