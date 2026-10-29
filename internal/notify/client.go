@@ -13,19 +13,30 @@ import (
 )
 
 type Client struct {
-	apiKey     string
+	apiKey      string
 	senderEmail string
 	senderName  string
 	http        *http.Client
 }
 
 func NewClientFromEnv() *Client {
-	return &Client{
+	c := &Client{
 		apiKey:      strings.TrimSpace(os.Getenv("BREVO_API_KEY")),
 		senderEmail: strings.TrimSpace(os.Getenv("BREVO_SENDER_EMAIL")),
-		senderName:  firstEnv("BREVO_SENDER_NAME", "SMTP_FROM_NAME", "Mentorship Platform"),
+		senderName:  firstEnv("BREVO_SENDER_NAME", "SMTP_FROM_NAME"),
 		http:        &http.Client{Timeout: 10 * time.Second},
 	}
+
+	// Proper fallback: used only when no sender name env var is set.
+	if c.senderName == "" {
+		c.senderName = "Mentorship Platform"
+	}
+
+	// One-time startup log so you can see in Render whether config was picked up.
+	log.Printf("notify client init: apiKey set=%t, senderEmail set=%t, senderName=%q, enabled=%t",
+		c.apiKey != "", c.senderEmail != "", c.senderName, c.Enabled())
+
+	return c
 }
 
 func firstEnv(keys ...string) string {
@@ -43,6 +54,12 @@ func (c *Client) Enabled() bool {
 
 func (c *Client) Send(to, subject, htmlBody string) error {
 	if !c.Enabled() {
+		if c == nil {
+			log.Printf("email to %s skipped: notify client is nil", to)
+		} else {
+			log.Printf("email to %s skipped: notify client disabled (apiKey set: %t, senderEmail set: %t)",
+				to, c.apiKey != "", c.senderEmail != "")
+		}
 		return nil
 	}
 
@@ -58,9 +75,15 @@ func (c *Client) Send(to, subject, htmlBody string) error {
 		"htmlContent": htmlBody,
 	}
 
-	bodyBytes, _ := json.Marshal(payload)
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("email to %s failed: could not encode payload: %v", to, err)
+		return err
+	}
+
 	req, err := http.NewRequest("POST", "https://api.brevo.com/v3/smtp/email", bytes.NewReader(bodyBytes))
 	if err != nil {
+		log.Printf("email to %s failed: could not build request: %v", to, err)
 		return err
 	}
 
@@ -82,5 +105,6 @@ func (c *Client) Send(to, subject, htmlBody string) error {
 		return err
 	}
 
+	log.Printf("email to %s accepted by brevo (status %d): %s", to, resp.StatusCode, string(respBody))
 	return nil
 }
