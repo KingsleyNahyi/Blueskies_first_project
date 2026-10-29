@@ -29,7 +29,7 @@ func main() {
 		log.Fatalf("migrations: %v", err)
 	}
 
-	notifyClient := notify.NewClient(cfg.ResendAPIKey, cfg.FromEmail)
+	notifyClient := notify.NewClientFromEnv()
 	if !notifyClient.Enabled() {
 		log.Println("RESEND_API_KEY not set, email sending is disabled")
 	}
@@ -132,4 +132,5 @@ func main() {
 	if err := http.ListenAndServe(":"+cfg.Port, r); err != nil {
 		log.Fatal(err)
 	}
+
 }

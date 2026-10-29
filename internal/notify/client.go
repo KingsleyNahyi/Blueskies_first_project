@@ -1,22 +1,44 @@
 package notify
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
-	"net/smtp"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
 )
 
 type Client struct {
-	password string // Holds your Gmail App Password
-	from     string // Holds your Gmail address
+	apiKey     string
+	senderEmail string
+	senderName  string
+	http        *http.Client
 }
 
-func NewClient(password, from string) *Client {
-	return &Client{password: password, from: from}
+func NewClientFromEnv() *Client {
+	return &Client{
+		apiKey:      strings.TrimSpace(os.Getenv("BREVO_API_KEY")),
+		senderEmail: strings.TrimSpace(os.Getenv("BREVO_SENDER_EMAIL")),
+		senderName:  firstEnv("BREVO_SENDER_NAME", "SMTP_FROM_NAME", "Mentorship Platform"),
+		http:        &http.Client{Timeout: 10 * time.Second},
+	}
 }
 
-// Enabled is nil-safe, so handlers can call it without checking for nil.
+func firstEnv(keys ...string) string {
+	for _, k := range keys {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func (c *Client) Enabled() bool {
-	return c != nil && c.password != "" && c.from != ""
+	return c != nil && c.apiKey != "" && c.senderEmail != ""
 }
 
 func (c *Client) Send(to, subject, htmlBody string) error {
@@ -24,24 +46,41 @@ func (c *Client) Send(to, subject, htmlBody string) error {
 		return nil
 	}
 
-	smtpHost := "smtp.gmail.com"
-	smtpPort := "587"
-
-	auth := smtp.PlainAuth("", c.from, c.password, smtpHost)
-
-	// Construct email headers with HTML support
-	mime := "MIME-version: 1.0;\nContent-Type: text/html; charset=\"UTF-8\";\n"
-	subjectHeader := fmt.Sprintf("Subject: %s\n", subject)
-	fromHeader := fmt.Sprintf("From: %s\n", c.from)
-	toHeader := fmt.Sprintf("To: %s\n", to)
-
-	msg := []byte(fromHeader + toHeader + subjectHeader + mime + "\n" + htmlBody)
-
-	// Send email via Gmail SMTP server
-	err := smtp.SendMail(smtpHost+":"+smtpPort, auth, c.from, []string{to}, msg)
-	if err != nil {
-		return fmt.Errorf("smtp send error: %w", err)
+	payload := map[string]interface{}{
+		"sender": map[string]string{
+			"name":  c.senderName,
+			"email": c.senderEmail,
+		},
+		"to": []map[string]string{
+			{"email": to},
+		},
+		"subject":     subject,
+		"htmlContent": htmlBody,
 	}
-	
+
+	bodyBytes, _ := json.Marshal(payload)
+	req, err := http.NewRequest("POST", "https://api.brevo.com/v3/smtp/email", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("api-key", c.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		log.Printf("brevo api request failed to %s: %v", to, err)
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 500))
+	if resp.StatusCode >= 300 {
+		err := fmt.Errorf("brevo api returned %d: %s", resp.StatusCode, string(respBody))
+		log.Printf("email to %s failed: %v", to, err)
+		return err
+	}
+
 	return nil
 }
