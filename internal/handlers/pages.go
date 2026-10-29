@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"database/sql"
+	"fmt"
+	"html"
 	"html/template"
 	"net/http"
 	"strconv"
@@ -13,24 +15,19 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/bluesbirds/academy/internal/middleware"
-	"github.com/bluesbirds/academy/internal/notify"
 	"github.com/bluesbirds/academy/internal/models"
+	"github.com/bluesbirds/academy/internal/notify"
 )
 
 type PageHandler struct {
-	DB        *sql.DB
-	JWTSecret string
-	Templates map[string]*template.Template
+	DB         *sql.DB
+	JWTSecret  string
+	Templates  map[string]*template.Template
 	Notify     *notify.Client
-AppBaseURL string
+	AppBaseURL string
 }
 
-// LoadPageTemplates builds one *template.Template per page, each combining
-// the shared base.html layout with that page's own content block. They're
-// parsed separately per page (not all together with ParseGlob) because
-// every page file defines a block named "content" — parsing them into one
-// shared set would make the later files silently overwrite the earlier
-// ones' "content" definition.
+// LoadPageTemplates builds one *template.Template per page.
 func LoadPageTemplates() map[string]*template.Template {
 	pages := []string{
 		"login", "signup", "mentee_dashboard", "mentor_dashboard",
@@ -112,14 +109,6 @@ func (h *PageHandler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
-// SignupForm / SignupSubmit are the PUBLIC, unauthenticated self-signup
-// flow — deliberately separate from the JSON API's /api/v1/auth/register,
-// which still accepts any role and stays that way on purpose: it's how
-// you (the admin) create mentor / academy_head / admin accounts by hand
-// for now, via curl/Invoke-RestMethod, not something exposed in the UI.
-// This handler NEVER reads a role from the form — it's hardcoded to
-// mentee below. That's the actual security fix: a public page that can
-// create privileged accounts is the bug, not the existence of roles.
 func (h *PageHandler) SignupForm(w http.ResponseWriter, r *http.Request) {
 	h.Templates["signup"].ExecuteTemplate(w, "base", loginView{PageTitle: "Sign up"})
 }
@@ -141,7 +130,7 @@ func (h *PageHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate and assign the chosen role (defaulting to mentee if invalid)
+	// Respect selected role from form submission
 	role := models.RoleMentee
 	if roleStr == "mentor" {
 		role = models.RoleMentor
@@ -179,7 +168,7 @@ func (h *PageHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
-// --- Dashboard: routes to the mentee or mentor view by role ---
+// --- Dashboard ---
 
 func (h *PageHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	userID, _ := middleware.UserIDFromContext(r.Context())
@@ -209,7 +198,6 @@ type taskView struct {
 	Flagged     bool
 }
 
-// courseCardView is one row on the mentee's course-overview dashboard.
 type courseCardView struct {
 	EnrollmentID    string
 	CourseTitle     string
@@ -226,9 +214,6 @@ type menteeOverviewView struct {
 	Courses   []courseCardView
 }
 
-// renderMenteeOverview lists every active enrollment for this mentee —
-// the dashboard is now a list of courses, not a single course's detail
-// (that moved to EnrollmentDetail / /enrollments/{id}).
 func (h *PageHandler) renderMenteeOverview(w http.ResponseWriter, userID string, user *models.User) {
 	rows, err := h.DB.Query(`
 		SELECT
@@ -280,9 +265,6 @@ type enrollmentDetailView struct {
 	Tasks           []taskView
 }
 
-// EnrollmentDetail is the per-course task timeline a mentee lands on
-// after clicking a course card — this is what the old single-course
-// mentee dashboard used to show directly.
 func (h *PageHandler) EnrollmentDetail(w http.ResponseWriter, r *http.Request) {
 	enrollmentID := chi.URLParam(r, "enrollmentID")
 	userID, _ := middleware.UserIDFromContext(r.Context())
@@ -306,9 +288,7 @@ func (h *PageHandler) EnrollmentDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// Mentees may only view their own enrollment. (Mentor/admin viewing
-	// any enrollment's detail page isn't wired up yet — only the
-	// aggregate mentor dashboard is, for now.)
+
 	if owner != userID {
 		http.Error(w, "not your enrollment", http.StatusForbidden)
 		return
@@ -379,9 +359,6 @@ type mentorDashboardView struct {
 	Mentees   []menteeRowView
 }
 
-// renderMentorDashboard mirrors DashboardHandler.MentorDashboard's query
-// (same status derivation: flagged > behind_pace > on_track) but adds
-// the display-only fields (Initials, PercentComplete) the template needs.
 func (h *PageHandler) renderMentorDashboard(w http.ResponseWriter, mentorID string, user *models.User) {
 	rows, err := h.DB.Query(`
 		SELECT
@@ -426,7 +403,7 @@ func (h *PageHandler) renderMentorDashboard(w http.ResponseWriter, mentorID stri
 		}
 		mentees = append(mentees, m)
 	}
-c
+
 	sortMenteesFlaggedFirst(mentees)
 
 	h.Templates["mentor_dashboard"].ExecuteTemplate(w, "base", mentorDashboardView{
@@ -454,7 +431,8 @@ func sortMenteesFlaggedFirst(m []menteeRowView) {
 	}
 }
 
-// --- Form actions (mentee marks a task done / flags it stuck) ---
+// --- Form actions ---
+
 func (h *PageHandler) CompleteTaskPage(w http.ResponseWriter, r *http.Request) {
 	enrollmentID := chi.URLParam(r, "enrollmentID")
 	taskID := chi.URLParam(r, "taskID")
@@ -472,7 +450,7 @@ func (h *PageHandler) CompleteTaskPage(w http.ResponseWriter, r *http.Request) {
 		uuid.NewString(), enrollmentID, taskID,
 	)
 	if err == nil {
-		// Asynchronously email the mentor that a task was completed
+		// Email the mentor when a task is completed
 		go func() {
 			if !h.Notify.Enabled() {
 				return
@@ -481,9 +459,9 @@ func (h *PageHandler) CompleteTaskPage(w http.ResponseWriter, r *http.Request) {
 			err := h.DB.QueryRow(`
 				SELECT mu.email, mu.name, me.name, c.title, ct.title
 				FROM enrollments e
-				JOIN courses c      ON c.id = e.course_id
-				JOIN users mu       ON mu.id = c.mentor_id
-				JOIN users me       ON me.id = e.mentee_id
+				JOIN courses c       ON c.id = e.course_id
+				JOIN users mu        ON mu.id = c.mentor_id
+				JOIN users me        ON me.id = e.mentee_id
 				JOIN course_tasks ct ON ct.id = ?
 				WHERE e.id = ?`, taskID, enrollmentID,
 			).Scan(&mentorEmail, &mentorName, &menteeName, &courseTitle, &taskTitle)
@@ -493,7 +471,7 @@ func (h *PageHandler) CompleteTaskPage(w http.ResponseWriter, r *http.Request) {
 
 			subject := fmt.Sprintf("%s completed \"%s\"", menteeName, taskTitle)
 			body := fmt.Sprintf(
-				`<p>Hi %s,</p><p><b>%s</b> just completed the task <b>%s</b> in course <b>%s</b>.</p><p><a href="%s/dashboard">Open your dashboard</a></p>`,
+				`<p>Hi %s,</p><p><b>%s</b> just completed <b>%s</b> in course <b>%s</b>.</p><p><a href="%s/dashboard">Open your dashboard</a></p>`,
 				html.EscapeString(mentorName), html.EscapeString(menteeName), html.EscapeString(taskTitle),
 				html.EscapeString(courseTitle), h.AppBaseURL,
 			)
@@ -524,27 +502,22 @@ func (h *PageHandler) CreateFlagPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "note is required", http.StatusBadRequest)
 		return
 	}
-if _, err := h.DB.Exec(
-	`INSERT INTO flags (id, enrollment_id, course_task_id, note, status) VALUES (?, ?, ?, ?, 'open')`,
-	uuid.NewString(), enrollmentID, taskID, note,
-); err == nil {
-	go notify.FlagCreated(h.DB, h.Notify, h.AppBaseURL, enrollmentID, taskID, note)
-}
+	if _, err := h.DB.Exec(
+		`INSERT INTO flags (id, enrollment_id, course_task_id, note, status) VALUES (?, ?, ?, ?, 'open')`,
+		uuid.NewString(), enrollmentID, taskID, note,
+	); err == nil {
+		go notify.FlagCreated(h.DB, h.Notify, h.AppBaseURL, enrollmentID, taskID, note)
+	}
 	http.Redirect(w, r, "/enrollments/"+enrollmentID, http.StatusSeeOther)
 }
 
-// ResolveEnrollmentFlagsPage is a POC simplification of the JSON API's
-// per-flag /flags/{flagID}/resolve: the mentor dashboard's "Resolve"
-// button acts per mentee row, not per individual flag, so this closes
-// every open flag on that enrollment at once rather than needing a
-// specific flag ID from the page.
 func (h *PageHandler) ResolveEnrollmentFlagsPage(w http.ResponseWriter, r *http.Request) {
 	enrollmentID := chi.URLParam(r, "enrollmentID")
 	h.DB.Exec(`UPDATE flags SET status = 'resolved', resolved_at = datetime('now') WHERE enrollment_id = ? AND status = 'open'`, enrollmentID)
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
-// --- Course creation (mentor) ---
+// --- Course creation ---
 
 type courseFormView struct {
 	PageTitle string
@@ -560,16 +533,8 @@ func (h *PageHandler) NewCourseForm(w http.ResponseWriter, r *http.Request) {
 	h.Templates["course_new"].ExecuteTemplate(w, "base", courseFormView{PageTitle: "New course", User: user})
 }
 
-// validTaskTypes guards against a malformed/tampered <select> value —
-// used both here and in AddTasksToCourseSubmit.
 var validTaskTypes = map[string]bool{"video": true, "reading": true, "resource": true, "other": true}
 
-// CreateCourseSubmit reads the task_title / task_type form fields the
-// "+ Add task" JS produces. Because every row uses the SAME field name
-// (name="task_title" on every row), the browser submits them as repeated
-// fields, and r.Form["task_title"] comes back as a slice in submission
-// order — index i of task_title lines up with index i of task_type.
-// No array-index naming (task_title[0], task_title[1]...) needed.
 func (h *PageHandler) CreateCourseSubmit(w http.ResponseWriter, r *http.Request) {
 	user := h.mustCurrentUser(w, r)
 	if user == nil {
@@ -637,7 +602,7 @@ func (h *PageHandler) CreateCourseSubmit(w http.ResponseWriter, r *http.Request)
 	http.Redirect(w, r, "/enrollments/new", http.StatusSeeOther)
 }
 
-// --- Course list + edit (mentor) ---
+// --- Course list + edit ---
 
 type courseListItem struct {
 	ID            string
@@ -702,10 +667,6 @@ type courseEditView struct {
 	Error         string
 }
 
-// courseOwnedByMentor is a small shared guard: confirms courseID exists
-// and belongs to this mentor, returning the course title for display.
-// Used by both CourseEdit and AddTasksToCourseSubmit so the ownership
-// check can't be forgotten in one of the two.
 func (h *PageHandler) courseOwnedByMentor(courseID, mentorID string) (string, bool) {
 	var title string
 	err := h.DB.QueryRow(`SELECT title FROM courses WHERE id = ? AND mentor_id = ?`, courseID, mentorID).Scan(&title)
@@ -750,20 +711,8 @@ func (h *PageHandler) CourseEdit(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// defaultTaskSpacingDays is used when backfilling due dates for tasks
-// added to a course AFTER mentees are already enrolled. The original
-// days_per_task a mentor chose at enrollment time isn't stored anywhere
-// per-enrollment (only the resulting due dates are), so there's no way
-// to recover their exact original cadence here — this is a deliberate
-// POC simplification, same spirit as the fixed default in
-// EnrollmentHandler.CreateEnrollment.
 const defaultTaskSpacingDays = 2
 
-// AddTasksToCourseSubmit appends new tasks to an existing course, then —
-// this is the important part — backfills a due date for each new task
-// on every mentee CURRENTLY enrolled in it, so an edited course actually
-// shows up on mentees' dashboards instead of silently having orphaned
-// tasks with no due date.
 func (h *PageHandler) AddTasksToCourseSubmit(w http.ResponseWriter, r *http.Request) {
 	user := h.mustCurrentUser(w, r)
 	if user == nil {
@@ -846,7 +795,6 @@ func (h *PageHandler) AddTasksToCourseSubmit(w http.ResponseWriter, r *http.Requ
 		inserted = append(inserted, newTaskID{ID: taskID, Task: t})
 	}
 
-	// Backfill due dates for every mentee already active in this course.
 	enrollRows, err := tx.Query(`SELECT id FROM enrollments WHERE course_id = ? AND status = 'active'`, courseID)
 	if err != nil {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
@@ -893,7 +841,7 @@ func (h *PageHandler) AddTasksToCourseSubmit(w http.ResponseWriter, r *http.Requ
 	http.Redirect(w, r, "/courses/"+courseID+"/edit", http.StatusSeeOther)
 }
 
-// --- Enrollment creation (mentor) ---
+// --- Enrollment creation ---
 
 type simpleCourse struct{ ID, Title string }
 type simpleMentee struct{ ID, Name, Email string }
@@ -923,14 +871,81 @@ func (h *PageHandler) NewEnrollmentForm(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// CreateEnrollmentSubmit runs the same enroll-then-spread-due-dates
-// transaction as the JSON API's EnrollmentHandler.CreateEnrollment.
-if err := tx.Commit(); err != nil {
+func (h *PageHandler) CreateEnrollmentSubmit(w http.ResponseWriter, r *http.Request) {
+	user := h.mustCurrentUser(w, r)
+	if user == nil {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	menteeID := r.FormValue("mentee_id")
+	courseID := r.FormValue("course_id")
+	daysPerTask, err := strconv.Atoi(r.FormValue("days_per_task"))
+	if err != nil || daysPerTask <= 0 {
+		daysPerTask = 2
+	}
+
+	reRender := func(errMsg string) {
+		courses, mentees, _ := h.loadCoursesAndMentees(user.ID)
+		h.Templates["enrollment_new"].ExecuteTemplate(w, "base", enrollmentFormView{
+			PageTitle: "Enroll a mentee", User: user, Error: errMsg, Courses: courses, Mentees: mentees,
+		})
+	}
+
+	if menteeID == "" || courseID == "" {
+		reRender("Please choose both a course and a mentee.")
+		return
+	}
+
+	tx, err := h.DB.Begin()
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	enrollmentID := uuid.NewString()
+	if _, err := tx.Exec(
+		`INSERT INTO enrollments (id, mentee_id, course_id, status) VALUES (?, ?, ?, 'active')`,
+		enrollmentID, menteeID, courseID,
+	); err != nil {
+		reRender("Could not enroll — maybe this mentee is already in this course?")
+		return
+	}
+
+	rows, err := tx.Query(`SELECT id FROM course_tasks WHERE course_id = ? ORDER BY order_index ASC`, courseID)
+	if err != nil {
+		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	var taskIDs []string
+	for rows.Next() {
+		var id string
+		rows.Scan(&id)
+		taskIDs = append(taskIDs, id)
+	}
+	rows.Close()
+
+	now := time.Now()
+	for i, taskID := range taskIDs {
+		due := now.AddDate(0, 0, (i+1)*daysPerTask).Format("2006-01-02")
+		if _, err := tx.Exec(
+			`INSERT INTO enrollment_task_due_dates (id, enrollment_id, course_task_id, due_date) VALUES (?, ?, ?, ?)`,
+			uuid.NewString(), enrollmentID, taskID, due,
+		); err != nil {
+			http.Error(w, "could not set due dates: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
 		http.Error(w, "could not save enrollment", http.StatusInternalServerError)
 		return
 	}
 
-	// Asynchronously email the mentee about their new course assignment
+	// Email the mentee when enrolled
 	go func() {
 		if !h.Notify.Enabled() {
 			return
@@ -956,6 +971,9 @@ if err := tx.Commit(); err != nil {
 	}()
 
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+// --- Shared helpers ---
 
 func (h *PageHandler) mustCurrentUser(w http.ResponseWriter, r *http.Request) *models.User {
 	userID, _ := middleware.UserIDFromContext(r.Context())
