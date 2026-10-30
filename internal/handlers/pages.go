@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	"fmt"
 	"html"
@@ -25,6 +26,10 @@ type PageHandler struct {
 	Templates  map[string]*template.Template
 	Notify     *notify.Client
 	AppBaseURL string
+
+	GoogleClientID     string
+	GoogleClientSecret string
+	MentorSignupCode   string // empty = mentor self-signup is disabled
 }
 
 // LoadPageTemplates builds one *template.Template per page.
@@ -57,14 +62,45 @@ func initials(name string) string {
 
 // --- Auth pages ---
 
-type loginView struct {
-	PageTitle string
-	User      *models.User
-	Error     string
+// authView feeds both login.html and signup.html.
+type authView struct {
+	PageTitle        string
+	User             *models.User
+	Error            string
+	GoogleEnabled    bool   // show the "Continue with Google" button
+	MentorSignupOpen bool   // false = no mentor code configured, so mentor sign-up is off
+	Name, Email      string // re-filled after a failed submit
+	Role             string // "mentee" or "mentor", re-selected after a failed submit
+}
+
+func (h *PageHandler) authPage(title, errMsg string) authView {
+	return authView{
+		PageTitle:        title,
+		Error:            errMsg,
+		GoogleEnabled:    h.googleEnabled(),
+		MentorSignupOpen: h.MentorSignupCode != "",
+		Role:             string(models.RoleMentee),
+	}
+}
+
+// authErrorMessage maps the short ?e= codes used by redirects to fixed
+// messages (so arbitrary text from a URL is never echoed onto the page).
+func authErrorMessage(code string) string {
+	switch code {
+	case "google_failed":
+		return "Google sign-in didn't complete. Please try again."
+	case "google_unverified":
+		return "That Google account's email isn't verified."
+	case "google_off":
+		return "Google sign-in isn't set up yet."
+	case "no_account":
+		return "No account found for that Google email. Sign up first."
+	}
+	return ""
 }
 
 func (h *PageHandler) LoginForm(w http.ResponseWriter, r *http.Request) {
-	h.Templates["login"].ExecuteTemplate(w, "base", loginView{PageTitle: "Log in"})
+	h.Templates["login"].ExecuteTemplate(w, "base", h.authPage("Log in", authErrorMessage(r.URL.Query().Get("e"))))
 }
 
 func (h *PageHandler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
@@ -72,18 +108,22 @@ func (h *PageHandler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
 	}
-	email := r.FormValue("email")
+	email := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
 	password := r.FormValue("password")
 
+	// There is no role field here on purpose. A person's role (mentee or
+	// mentor) belongs to their ACCOUNT, chosen at sign-up; logging in just
+	// loads it, and /dashboard shows the matching view.
 	var user models.User
 	err := h.DB.QueryRow(
-		`SELECT id, email, password_hash, name, role, created_at FROM users WHERE email = ?`,
+		`SELECT id, email, password_hash, name, role, created_at FROM users WHERE lower(email) = ?`,
 		email,
 	).Scan(&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.Role, &user.CreatedAt)
 
 	invalid := err == sql.ErrNoRows
 	if err == nil {
-		if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
+		// Google-created accounts have an empty hash, which never matches.
+		if user.PasswordHash == "" || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
 			invalid = true
 		}
 	} else if err != sql.ErrNoRows {
@@ -93,10 +133,9 @@ func (h *PageHandler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 
 	if invalid {
 		w.WriteHeader(http.StatusUnauthorized)
-		h.Templates["login"].ExecuteTemplate(w, "base", loginView{
-			PageTitle: "Log in",
-			Error:     "Invalid email or password.",
-		})
+		view := h.authPage("Log in", "Invalid email or password.")
+		view.Email = email
+		h.Templates["login"].ExecuteTemplate(w, "base", view)
 		return
 	}
 
@@ -109,8 +148,29 @@ func (h *PageHandler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
+// validateSignupRole decides which role a public sign-up may get.
+// Only "mentee" and "mentor" are ever possible from the website; admin and
+// academy_head can never be self-assigned. Mentor additionally needs the
+// access code from MENTOR_SIGNUP_CODE, otherwise anyone on the internet
+// could become a mentor (and mentors can see every mentee's name and email).
+func (h *PageHandler) validateSignupRole(role, code string) (models.Role, string) {
+	switch role {
+	case "", string(models.RoleMentee):
+		return models.RoleMentee, ""
+	case string(models.RoleMentor):
+		if h.MentorSignupCode == "" {
+			return "", "Mentor accounts are by invitation right now."
+		}
+		if subtle.ConstantTimeCompare([]byte(strings.TrimSpace(code)), []byte(h.MentorSignupCode)) != 1 {
+			return "", "That mentor access code isn't right."
+		}
+		return models.RoleMentor, ""
+	}
+	return "", "Please choose mentee or mentor."
+}
+
 func (h *PageHandler) SignupForm(w http.ResponseWriter, r *http.Request) {
-	h.Templates["signup"].ExecuteTemplate(w, "base", loginView{PageTitle: "Sign up"})
+	h.Templates["signup"].ExecuteTemplate(w, "base", h.authPage("Sign up", authErrorMessage(r.URL.Query().Get("e"))))
 }
 
 func (h *PageHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
@@ -119,21 +179,27 @@ func (h *PageHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(r.FormValue("name"))
-	email := strings.TrimSpace(r.FormValue("email"))
+	email := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
 	password := r.FormValue("password")
-	roleStr := r.FormValue("role")
+	roleInput := r.FormValue("role")
 
-	if name == "" || email == "" || len(password) < 8 {
-		h.Templates["signup"].ExecuteTemplate(w, "base", loginView{
-			PageTitle: "Sign up", Error: "Name, email, and a password of at least 8 characters are required.",
-		})
-		return
+	fail := func(msg string) {
+		view := h.authPage("Sign up", msg)
+		view.Name, view.Email = name, email
+		if roleInput == string(models.RoleMentor) {
+			view.Role = roleInput
+		}
+		h.Templates["signup"].ExecuteTemplate(w, "base", view)
 	}
 
-	// Respect selected role from form submission
-	role := models.RoleMentee
-	if roleStr == "mentor" {
-		role = models.RoleMentor
+	if name == "" || email == "" || len(password) < 8 {
+		fail("Name, email, and a password of at least 8 characters are required.")
+		return
+	}
+	role, errMsg := h.validateSignupRole(roleInput, r.FormValue("code"))
+	if errMsg != "" {
+		fail(errMsg)
+		return
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -142,15 +208,22 @@ func (h *PageHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Emails are compared case-insensitively, so "Ama@x.com" and "ama@x.com"
+	// can't become two different accounts.
+	var exists int
+	h.DB.QueryRow(`SELECT COUNT(*) FROM users WHERE lower(email) = ?`, email).Scan(&exists)
+	if exists > 0 {
+		fail("That email is already registered. Try logging in instead.")
+		return
+	}
+
 	userID := uuid.NewString()
 	_, err = h.DB.Exec(
 		`INSERT INTO users (id, email, password_hash, name, role) VALUES (?, ?, ?, ?, ?)`,
-		userID, email, string(hash), name, role,
+		userID, email, string(hash), name, string(role),
 	)
 	if err != nil {
-		h.Templates["signup"].ExecuteTemplate(w, "base", loginView{
-			PageTitle: "Sign up", Error: "That email is already registered.",
-		})
+		fail("That email is already registered.")
 		return
 	}
 
@@ -444,12 +517,20 @@ func (h *PageHandler) CompleteTaskPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := h.DB.Exec(
+	res, err := h.DB.Exec(
 		`INSERT INTO task_completions (id, enrollment_id, course_task_id) VALUES (?, ?, ?)
 		 ON CONFLICT (enrollment_id, course_task_id) DO NOTHING`,
 		uuid.NewString(), enrollmentID, taskID,
 	)
+	// RowsAffected is 0 when the task was already completed (a repeat click),
+	// so the mentor only gets an email the first time.
+	firstCompletion := false
 	if err == nil {
+		if n, _ := res.RowsAffected(); n > 0 {
+			firstCompletion = true
+		}
+	}
+	if firstCompletion {
 		// Email the mentor when a task is completed
 		go func() {
 			if !h.Notify.Enabled() {

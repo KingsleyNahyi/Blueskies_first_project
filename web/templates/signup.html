@@ -1,31 +1,78 @@
-\{{define "content"}}
+{{define "content"}}
 <div class="auth-card">
-  <h1>Sign up</h1>
-  <p class="muted">Create a new account as a mentee or a mentor.</p>
+  <h1>Create your account</h1>
 
   {{if .Error}}
     <div class="alert alert-error">{{.Error}}</div>
   {{end}}
 
-  <form method="POST" action="/signup">
+  <form method="POST" action="/signup" id="signup-form">
+    <label>I'm joining as a</label>
+    <div class="role-choice">
+      <label class="role-option">
+        <input type="radio" name="role" value="mentee" {{if ne .Role "mentor"}}checked{{end}}>
+        <span>Mentee</span>
+      </label>
+      <label class="role-option">
+        <input type="radio" name="role" value="mentor" {{if eq .Role "mentor"}}checked{{end}}>
+        <span>Mentor</span>
+      </label>
+    </div>
+
+    <div id="mentor-code-block" style="display:none">
+      {{if .MentorSignupOpen}}
+        <label for="code">Mentor access code</label>
+        <input type="text" id="code" name="code" autocomplete="off">
+        <p class="muted">Ask the academy for this code. It keeps mentor accounts to people we've invited.</p>
+      {{else}}
+        <p class="muted">Mentor accounts are by invitation right now.</p>
+      {{end}}
+    </div>
+
     <label for="name">Full name</label>
-    <input type="text" id="name" name="name" required autofocus>
+    <input type="text" id="name" name="name" value="{{.Name}}" required>
 
     <label for="email">Email</label>
-    <input type="email" id="email" name="email" required>
+    <input type="email" id="email" name="email" value="{{.Email}}" required>
 
     <label for="password">Password</label>
     <input type="password" id="password" name="password" required minlength="8">
-
-    <label for="role">Role</label>
-    <select id="role" name="role" required style="margin-bottom: 16px; width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #ccc;">
-      <option value="mentee" selected>Mentee</option>
-      <option value="mentor">Mentor</option>
-      <option value="admin">Admin</option>
-    </select>
+    <p class="muted">At least 8 characters.</p>
 
     <button type="submit" class="btn btn-primary btn-block">Sign up</button>
   </form>
+
+  {{if .GoogleEnabled}}
+  <div class="divider"><span>or</span></div>
+  <form method="POST" action="/auth/google/signup" id="google-form">
+    <input type="hidden" name="role" id="g-role" value="mentee">
+    <input type="hidden" name="code" id="g-code" value="">
+    <button type="submit" class="btn btn-google btn-block">Sign up with Google</button>
+  </form>
+  {{end}}
+
   <p class="muted" style="margin-top:12px">Already have an account? <a href="/login">Log in</a></p>
 </div>
+
+<script>
+  // Show the mentor code box only when "Mentor" is selected, and keep the
+  // hidden fields in the Google form in step with the main form.
+  (function () {
+    var radios = document.querySelectorAll('input[name="role"]');
+    var block = document.getElementById('mentor-code-block');
+    var code = document.getElementById('code');
+    var gRole = document.getElementById('g-role');
+    var gCode = document.getElementById('g-code');
+
+    function sync() {
+      var role = document.querySelector('input[name="role"]:checked').value;
+      block.style.display = role === 'mentor' ? 'block' : 'none';
+      if (gRole) gRole.value = role;
+      if (gCode) gCode.value = code ? code.value : '';
+    }
+    radios.forEach(function (r) { r.addEventListener('change', sync); });
+    if (code) code.addEventListener('input', sync);
+    sync();
+  })();
+</script>
 {{end}}

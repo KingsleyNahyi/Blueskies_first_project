@@ -1,6 +1,7 @@
 {{define "content"}}
 <div class="auth-card">
   <h1>Log in</h1>
+  <p class="muted">Mentees and mentors log in here. You'll land on the view that matches your account.</p>
 
   {{if .Error}}
     <div class="alert alert-error">{{.Error}}</div>
@@ -8,13 +9,19 @@
 
   <form method="POST" action="/login">
     <label for="email">Email</label>
-    <input type="email" id="email" name="email" required autofocus>
+    <input type="email" id="email" name="email" value="{{.Email}}" required autofocus>
 
     <label for="password">Password</label>
     <input type="password" id="password" name="password" required>
 
     <button type="submit" class="btn btn-primary btn-block">Log in</button>
   </form>
-  <p class="muted" style="margin-top:12px">New here? <a href="/signup">Sign up</a> as a learner.</p>
+
+  {{if .GoogleEnabled}}
+  <div class="divider"><span>or</span></div>
+  <a href="/auth/google/login" class="btn btn-google btn-block">Continue with Google</a>
+  {{end}}
+
+  <p class="muted" style="margin-top:12px">New here? <a href="/signup">Create an account</a></p>
 </div>
 {{end}}

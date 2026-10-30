@@ -29,9 +29,22 @@ func main() {
 		log.Fatalf("migrations: %v", err)
 	}
 
-	notifyClient := notify.NewClientFromEnv()
+	if cfg.Env == "prod" && cfg.JWTSecret == "dev-secret-change-me" {
+		log.Fatal("JWT_SECRET is still the public default: set a long random JWT_SECRET before running in prod")
+	}
+	if cfg.Env == "prod" && cfg.DatabaseURL == "file:local.db" {
+		log.Println("WARNING: DATABASE_URL is a local file. On Render that disk is wiped on every deploy, so users would vanish. Use your Turso libsql:// URL.")
+	}
+
+	notifyClient := notify.NewClientFromEnv() // Brevo (BREVO_* env vars)
 	if !notifyClient.Enabled() {
-		log.Println("RESEND_API_KEY not set, email sending is disabled")
+		log.Println("BREVO_API_KEY / BREVO_SENDER_EMAIL not set: email sending is disabled")
+	}
+	if cfg.GoogleClientID == "" || cfg.GoogleClientSecret == "" {
+		log.Println("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set: Google sign-in is hidden")
+	}
+	if cfg.MentorSignupCode == "" {
+		log.Println("MENTOR_SIGNUP_CODE not set: mentor self-signup is disabled")
 	}
 
 	authH := &handlers.AuthHandler{DB: conn, JWTSecret: cfg.JWTSecret}
@@ -43,9 +56,10 @@ func main() {
 	pageH := &handlers.PageHandler{
 		DB: conn, JWTSecret: cfg.JWTSecret, Templates: handlers.LoadPageTemplates(),
 		Notify: notifyClient, AppBaseURL: cfg.AppBaseURL,
+		GoogleClientID: cfg.GoogleClientID, GoogleClientSecret: cfg.GoogleClientSecret,
+		MentorSignupCode: cfg.MentorSignupCode,
 	}
 	dashboardH := &handlers.DashboardHandler{DB: conn}
-
 
 	r := chi.NewRouter()
 	r.Use(chimiddleware.Logger)
@@ -79,6 +93,11 @@ func main() {
 	r.Post("/signup", pageH.SignupSubmit)
 	r.Get("/logout", pageH.Logout)
 
+	// Google sign-in (OAuth 2.0)
+	r.Get("/auth/google/login", pageH.GoogleLogin)
+	r.Post("/auth/google/signup", pageH.GoogleSignup)
+	r.Get("/auth/google/callback", pageH.GoogleCallback)
+
 	r.Group(func(r chi.Router) {
 		r.Use(appmiddleware.RequireAuthCookie(cfg.JWTSecret))
 
@@ -106,7 +125,9 @@ func main() {
 
 	// --- JSON API (unchanged — still JWT-over-header, for any future JS/mobile client) ---
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Post("/auth/register", authH.Register)
+		// This endpoint can create ANY role (admin, academy_head), so it is locked
+		// behind the SETUP_KEY header. Public sign-up goes through /signup instead.
+		r.With(appmiddleware.RequireSetupKey(cfg.SetupKey)).Post("/auth/register", authH.Register)
 		r.Post("/auth/login", authH.Login)
 
 		r.Group(func(r chi.Router) {

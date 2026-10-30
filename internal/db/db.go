@@ -6,38 +6,45 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	//libsql - tursodbs forked version of sqllite
-	_ "github.com/tursodatabase/libsql-client-go/libsql"
 	_ "github.com/mattn/go-sqlite3" // registers the "sqlite3" driver used for local file: DSNs in dev
+	_ "github.com/tursodatabase/libsql-client-go/libsql"
 )
 
-//function for the connection of the database takes the urla nd the authentication string. 
+// function for the connection of the database takes the urla nd the authentication string.
 func Connect(databaseURL, authToken string) (*sql.DB, error) {
 
-	//using the database URL directly if connecting locally gluing an authentication token if connecting remotely. 
+	//using the database URL directly if connecting locally gluing an authentication token if connecting remotely.
 	dsn := databaseURL
 	if authToken != "" {
 		dsn = fmt.Sprintf("%s?authToken=%s", databaseURL, authToken)
 	}
 
 	//sql.Open to validate if libsq as a driver exists, uses the dsn t
-	//pool is created pointer to sql.DB returned 
-	//we use an sql.DB pointer so every connection has a reference to it instead of the actual value so they are all in sync essentially it is more efficient that requiring to update copies if they have different values. 
+	//pool is created pointer to sql.DB returned
+	//we use an sql.DB pointer so every connection has a reference to it instead of the actual value so they are all in sync essentially it is more efficient that requiring to update copies if they have different values.
 	conn, err := sql.Open("libsql", dsn)
-	
-	//error handling 
+
+	//error handling
 	if err != nil {
 		return nil, fmt.Errorf("opening db: %w", err)
 	}
 
-	//using a ping to actually check if a connection works. 
+	//using a ping to actually check if a connection works.
 	if err := conn.Ping(); err != nil {
 		return nil, fmt.Errorf("pinging db: %w", err)
 	}
 
-	//limiting the number of open connections to the databse. 
+	//limiting the number of open connections to the databse.
 	conn.SetMaxOpenConns(1)
+
+	// Close connections that sit idle for 30s so the next request opens a fresh
+	// one. A quiet app (Render free services sleep when unused) can otherwise
+	// hold a connection Turso has already dropped, and the first request after
+	// the quiet period fails with a "stream"/connection error.
+	conn.SetConnMaxIdleTime(30 * time.Second)
 
 	return conn, nil
 }

@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 )
 
 // Config holds everything the app needs to boot. All values come from
@@ -13,12 +14,22 @@ type Config struct {
 	DatabaseAuth string // Turso auth token; empty for local sqlite
 	JWTSecret    string
 	Env          string // "dev" | "prod"
-	ResendAPIKey string
-FromEmail    string
-AppBaseURL   string
+	AppBaseURL   string // public URL of the site, no trailing slash; used in emails and as the Google redirect
+
+	// Google sign-in (OAuth 2.0). Leave blank to hide the Google buttons.
+	GoogleClientID     string
+	GoogleClientSecret string
+
+	// Anyone can self-register as a mentee. Mentor self-registration needs
+	// this code; if it is empty, mentor sign-up is switched off entirely.
+	MentorSignupCode string
+
+	// Protects the JSON endpoint that can create ANY role (admin, academy_head).
+	// Send it as the X-Setup-Key header. Empty = that endpoint is disabled.
+	SetupKey string
 }
 
-//loading the environment functinos using the get env helpers. 
+// Email settings (GMAIL_*) are read directly by notify.NewClientFromEnv.
 func Load() Config {
 	return Config{
 		Port:         getEnv("PORT", "8080"),
@@ -26,23 +37,20 @@ func Load() Config {
 		DatabaseAuth: getEnv("DATABASE_AUTH_TOKEN", ""),
 		JWTSecret:    getEnv("JWT_SECRET", "dev-secret-change-me"),
 		Env:          getEnv("APP_ENV", "dev"),
-		ResendAPIKey: getEnv("RESEND_API_KEY", ""),
-FromEmail:    getEnv("FROM_EMAIL", "Bluesbirds Academy <onboarding@resend.dev>"),
-AppBaseURL:   getEnv("APP_BASE_URL", "http://localhost:8080"),
+		AppBaseURL:   strings.TrimRight(getEnv("APP_BASE_URL", "http://localhost:8080"), "/"),
+
+		GoogleClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
+
+		MentorSignupCode: getEnv("MENTOR_SIGNUP_CODE", ""),
+		SetupKey:         getEnv("SETUP_KEY", ""),
 	}
 }
 
-//this getenv function  is a helper essentially gets the environment values through the key or uses a fallback/default string 
-
+// getEnv returns the env var if it is set and non-empty, otherwise the fallback.
 func getEnv(key, fallback string) string {
-	//attempt to optain the key
-	v := os.Getenv(key)
-
-	
-	if v != "" {
+	if v := os.Getenv(key); v != "" {
 		return v
 	}
-
-	//if we dont get a key we return fallback . 
 	return fallback
 }
